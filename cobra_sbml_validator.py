@@ -20,6 +20,7 @@ import cobra
 from cobra.core.Gene import parse_gpr
 from cobra.manipulation import check_mass_balance, check_reaction_bounds, \
     check_metabolite_compartment_formula
+import bigg_tools
 
 from libsbml import SBMLValidator
 
@@ -63,8 +64,13 @@ def load_SBML(contents, filename):
     try:  # this function fails if a model can not be created
         model, errors = cobra.io.sbml3.validate_sbml_model(
             contents, check_model=False)  # checks are run later
-    except cobra.io.sbml3.CobraSBMLError as e:
-        return None, [], str(e)
+    except cobra.io.sbml3.CobraSBMLError:
+        try:
+            model = cobra.io.read_sbml_model(contents)
+            fbc_msg = 'Legacy SBML model will not be fully validated. Use SBML Level 3 with FBC version 2 for full support.'
+            return model, [fbc_msg], None
+        except Exception as e:
+            return None, [], '(libSBML error) %s' % e
     else:
         return model, errors, None
 
@@ -88,6 +94,12 @@ def run_libsbml_validation(contents, filename):
         errors.append("L%d C%d: %s" % (failure.getLine(), failure.getColumn(),
                                        failure.getMessage()))
     return errors
+
+
+def run_bigg_tools_validation(model):
+    """Returns ([errors], [warnings])"""
+    # errors = bigg_tools.validate_model(model, web_output=True)
+    return [], []
 
 
 def decompress_file(body, filename):
@@ -203,6 +215,11 @@ class Upload(tornado.web.RequestHandler):
         result = yield executor.submit(validate_model, model)
         result["errors"].extend(errors)
         result["warnings"].extend(warnings)
+
+        bt_errors, bt_warnings = yield executor.submit(run_bigg_tools_validation, model)
+        result["errors"].extend(bt_errors)
+        result["warnings"].extend(bt_warnings)
+
         self.finish(result)
 
 
